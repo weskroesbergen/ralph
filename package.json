@@ -1,0 +1,17 @@
+{
+  "name": "@iannuttall/ralph",
+  "version": "0.1.0",
+  "description": "Global Ralph loop runner with optional local templates",
+  "bin": {
+    "ralph": "bin/ralph"
+  },
+  "scripts": {
+    "test": "node tests/cli-smoke.mjs && node tests/agent-loops.mjs",
+    "test:real": "node tests/real-agents.mjs",
+    "test:ping": "node tests/agent-ping.mjs"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0"
+  },
+  "license": "MIT"
+}
