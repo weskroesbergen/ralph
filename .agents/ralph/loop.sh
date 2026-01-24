@@ -104,7 +104,8 @@ TMP_DIR="$(abs_path "$TMP_DIR")"
 RUNS_DIR="$(abs_path "$RUNS_DIR")"
 GUARDRAILS_REF="$(abs_path "$GUARDRAILS_REF")"
 CONTEXT_REF="$(abs_path "$CONTEXT_REF")"
-ACTIVITY_CMD="$(abs_path "$ACTIVITY_CMD")"
+# ACTIVITY_CMD is a shell command, not a file path - don't abs_path it
+# ACTIVITY_CMD="$(abs_path "$ACTIVITY_CMD")"
 
 require_agent() {
   local agent_cmd="${1:-$AGENT_CMD}"
@@ -137,14 +138,76 @@ require_agent() {
 
 run_agent() {
   local prompt_file="$1"
-  if [[ "$AGENT_CMD" == *"{prompt}"* ]]; then
+  local output
+  local exit_code
+  local cmd="$AGENT_CMD"
+
+  # Inject --settings if RALPH_SETTINGS is set
+  if [[ -n "${RALPH_SETTINGS:-}" ]]; then
+    # Insert --settings after the agent binary name
+    # e.g., "claude -p ..." -> "claude --settings ~/.claude/custom.json -p ..."
+    if [[ "$cmd" =~ ^([a-z][a-z0-9_-]*)\  ]]; then
+      local agent_bin="${BASH_REMATCH[1]}"
+      cmd="${cmd/#$agent_bin /$agent_bin --settings \"$RALPH_SETTINGS\" }"
+    fi
+  fi
+
+  if [[ "$cmd" == *"{prompt}"* ]]; then
     local escaped
     escaped=$(printf '%q' "$prompt_file")
-    local cmd="${AGENT_CMD//\{prompt\}/$escaped}"
-    eval "$cmd"
+    cmd="${cmd//\{prompt\}/$escaped}"
+    output=$(eval "$cmd" 2>&1)
+    exit_code=$?
   else
-    cat "$prompt_file" | eval "$AGENT_CMD"
+    output=$(cat "$prompt_file" | eval "$cmd" 2>&1)
+    exit_code=$?
   fi
+
+  # Check for Claude CLI "No messages returned" error
+  if echo "$output" | grep -q "No messages returned"; then
+    # This error occurs when Claude tries to resume a thread with no messages
+    # Clear conversation state and retry with --fresh flag
+    local claude_dir="$HOME/.claude"
+    local conversations_dir="$claude_dir/conversations"
+    if [ -d "$conversations_dir" ]; then
+      # Find and remove the most recent conversation (likely the problematic one)
+      local latest_conv
+      latest_conf="$(find "$conversations_dir" -type f -name "*.json" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)"
+      if [ -n "$latest_conf" ]; then
+        echo "[Ralph] Detected 'No messages returned' error. Clearing conversation state: $latest_conf" >&2
+        rm -f "$latest_conf"
+      fi
+    fi
+
+    # Retry with fresh conversation (add --fresh for Claude)
+    local retry_cmd="$AGENT_CMD"
+    # Inject --settings if RALPH_SETTINGS is set
+    if [[ -n "${RALPH_SETTINGS:-}" ]]; then
+      if [[ "$retry_cmd" =~ ^([a-z][a-z0-9_-]*)\  ]]; then
+        local agent_bin="${BASH_REMATCH[1]}"
+        retry_cmd="${retry_cmd/#$agent_bin /$agent_bin --settings \"$RALPH_SETTINGS\" }"
+      fi
+    fi
+    if [[ "$retry_cmd" == *"{prompt}"* ]]; then
+      local escaped
+      escaped=$(printf '%q' "$prompt_file")
+      local cmd="${retry_cmd//\{prompt\}/$escaped}"
+      # Insert --fresh after 'claude' if not already present
+      if [[ "$cmd" =~ claude\  ]] && [[ ! "$cmd" =~ --fresh ]]; then
+        cmd="${cmd/claude /claude --fresh }"
+      fi
+      output=$(eval "$cmd" 2>&1)
+      exit_code=$?
+    else
+      # For piped commands, add --fresh flag
+      local fresh_cmd="${retry_cmd/claude /claude --fresh }"
+      output=$(cat "$prompt_file" | eval "$fresh_cmd" 2>&1)
+      exit_code=$?
+    fi
+  fi
+
+  printf '%s\n' "$output"
+  return "$exit_code"
 }
 
 run_agent_inline() {
@@ -154,6 +217,15 @@ run_agent_inline() {
   local escaped
   escaped=$(printf "%s" "$prompt_content" | sed "s/'/'\\\\''/g")
   local cmd="${PRD_AGENT_CMD:-$AGENT_CMD}"
+
+  # Inject --settings if RALPH_SETTINGS is set
+  if [[ -n "${RALPH_SETTINGS:-}" ]]; then
+    if [[ "$cmd" =~ ^([a-z][a-z0-9_-]*)\  ]]; then
+      local agent_bin="${BASH_REMATCH[1]}"
+      cmd="${cmd/#$agent_bin /$agent_bin --settings \"$RALPH_SETTINGS\" }"
+    fi
+  fi
+
   if [[ "$cmd" == *"{prompt}"* ]]; then
     cmd="${cmd//\{prompt\}/'$escaped'}"
   else
@@ -314,6 +386,19 @@ if [ ! -f "$GUARDRAILS_PATH" ]; then
     echo "## Learned Signs"
     echo ""
   } > "$GUARDRAILS_PATH"
+fi
+
+# Add the PRD completion guardrail if not already present
+if ! grep -q "PRD Complete Before Story Done" "$GUARDRAILS_PATH" 2>/dev/null; then
+  {
+    echo "### Sign: PRD Complete Before Story Done"
+    echo "- **Trigger**: Before outputting \`<promise>COMPLETE</promise>\`"
+    echo "- **Instruction**: Story is NOT complete until the PRD JSON status is updated to \"done\""
+    echo "- **Why**: The PRD is the source of truth. Without this update, the story will be re-picked in future iterations."
+    echo "- **Action**: Before completing, verify the story's status in the PRD shows \"done\", not \"in_progress\" or \"open\""
+    echo "- **Added after**: Stories being marked complete in code but PRD staying stale, causing redundant work"
+    echo ""
+  } >> "$GUARDRAILS_PATH"
 fi
 
 if [ ! -f "$ERRORS_LOG_PATH" ]; then
@@ -840,6 +925,16 @@ git_dirty_files() {
 echo "Ralph mode: $MODE"
 echo "Max iterations: $MAX_ITERATIONS"
 echo "PRD: $PRD_PATH"
+# Detect and display agent info
+AGENT_BIN="${AGENT_CMD%% *}"
+AGENT_DISPLAY="$AGENT_BIN"
+if [[ "$AGENT_CMD" == *"zai-settings.json"* ]]; then
+  AGENT_DISPLAY="$AGENT_BIN (glm via z.ai settings)"
+elif [[ "$AGENT_CMD" == *"--settings"* ]]; then
+  SETTINGS_FILE=$(echo "$AGENT_CMD" | grep -o '--settings [^ ]*' | cut -d' ' -f2)
+  AGENT_DISPLAY="$AGENT_BIN (custom: $SETTINGS_FILE)"
+fi
+echo "Agent: $AGENT_DISPLAY"
 HAS_ERROR="false"
 
 for i in $(seq 1 "$MAX_ITERATIONS"); do
