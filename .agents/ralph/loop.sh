@@ -1079,10 +1079,21 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   fi
 
   if [ "$MODE" = "build" ]; then
+    # Check for critical errors in the log that indicate failure, even if exit code was 0
+    HAS_CRITICAL_ERROR=false
+    if grep -qiE "No messages returned" "$LOG_FILE"; then
+      log_error "ITERATION $i: 'No messages returned' error in log; agent may not have produced valid output"
+      HAS_CRITICAL_ERROR=true
+    fi
+
     if [ "$CMD_STATUS" -ne 0 ]; then
       log_error "ITERATION $i exited non-zero; review $LOG_FILE"
       update_story_status "$STORY_ID" "open"
       echo "Iteration failed; story reset to open."
+    elif [ "$HAS_CRITICAL_ERROR" = "true" ]; then
+      log_error "ITERATION $i had critical error in log; review $LOG_FILE"
+      update_story_status "$STORY_ID" "open"
+      echo "Iteration had critical error; story reset to open."
     else
       # Check for completion signal with robust pattern matching
       # Signal must be on its own line, but we allow for:
