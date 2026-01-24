@@ -167,6 +167,7 @@ run_agent() {
   if echo "$output" | grep -q "No messages returned"; then
     # This error occurs when Claude tries to resume a thread with no messages
     # Clear conversation state and retry with --fresh flag
+    echo "[Ralph] 'No messages returned' error detected. Clearing conversation state and retrying with --fresh..." >&2
     local claude_dir="$HOME/.claude"
     local conversations_dir="$claude_dir/conversations"
     if [ -d "$conversations_dir" ]; then
@@ -174,7 +175,7 @@ run_agent() {
       local latest_conv
       latest_conf="$(find "$conversations_dir" -type f -name "*.json" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)"
       if [ -n "$latest_conf" ]; then
-        echo "[Ralph] Detected 'No messages returned' error. Clearing conversation state: $latest_conf" >&2
+        echo "[Ralph] Clearing conversation state: $latest_conf" >&2
         rm -f "$latest_conf"
       fi
     fi
@@ -196,20 +197,28 @@ run_agent() {
       if [[ "$cmd" =~ claude\  ]] && [[ ! "$cmd" =~ --fresh ]]; then
         cmd="${cmd/claude /claude --fresh }"
       fi
+      echo "[Ralph] Retrying with --fresh flag..." >&2
       output=$(eval "$cmd" 2>&1)
       exit_code=$?
     else
       # For piped commands, add --fresh flag
       local fresh_cmd="${retry_cmd/claude /claude --fresh }"
+      echo "[Ralph] Retrying with --fresh flag..." >&2
       output=$(cat "$prompt_file" | eval "$fresh_cmd" 2>&1)
       exit_code=$?
+    fi
+
+    # Check if retry also failed with "No messages returned"
+    if echo "$output" | grep -q "No messages returned"; then
+      echo "[Ralph] ERROR: Retry also failed with 'No messages returned'. This may indicate a deeper issue with the Claude CLI state." >&2
+      log_error "Agent retry failed: 'No messages returned' error persisted after --fresh retry"
     fi
   fi
 
   # Detect and report common script errors that might cause hangs or failed completion
   if [ "$exit_code" -ne 0 ]; then
     # Check for specific error patterns
-    if echo "$output" | grep -qiE "(SyntaxError|Traceback|TypeError|ReferenceError|undefined is not a function|Cannot read|script error|permission denied|command not found)"; then
+    if echo "$output" | grep -qiE "(SyntaxError|Traceback|TypeError|ReferenceError|undefined is not a function|Cannot read|script error|permission denied|command not found|No messages returned)"; then
       echo "[Ralph] WARNING: Script error detected in agent output!" >&2
       echo "[Ralph] The agent may have encountered a runtime error that prevented completion." >&2
     fi
