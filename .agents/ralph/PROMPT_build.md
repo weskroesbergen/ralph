@@ -94,10 +94,22 @@ Run summary: {{RUN_META_PATH}}
 
 ## Completion Signal
 Only output the completion signal when the **selected story** is fully complete and verified.
-When the selected story is complete, output:
+
+**CRITICAL:** The completion signal MUST be:
+1. On its own line (not merged with other text)
+2. The EXACT format shown below (case-sensitive)
+3. The final content you output (nothing after it)
+
+When the selected story is complete, output this as a standalone final line:
 <promise>COMPLETE</promise>
 
 Otherwise, end normally without the signal.
+
+**Common mistakes to avoid:**
+- ❌ "Done! <promise>COMPLETE</promise>" (merged with text)
+- ❌ "<promise>complete</promise>" (wrong case)
+- ❌ "< promise >COMPLETE</promise>" (extra spaces in tags)
+- ✅ <promise>COMPLETE</promise> (on its own line, exact format)
 
 ## Additional Guardrails
 - When authoring documentation, capture the why (tests + implementation intent).

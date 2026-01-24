@@ -206,6 +206,21 @@ run_agent() {
     fi
   fi
 
+  # Detect and report common script errors that might cause hangs or failed completion
+  if [ "$exit_code" -ne 0 ]; then
+    # Check for specific error patterns
+    if echo "$output" | grep -qiE "(SyntaxError|Traceback|TypeError|ReferenceError|undefined is not a function|Cannot read|script error|permission denied|command not found)"; then
+      echo "[Ralph] WARNING: Script error detected in agent output!" >&2
+      echo "[Ralph] The agent may have encountered a runtime error that prevented completion." >&2
+    fi
+  fi
+
+  # Detect potential hangs (interactive prompts, waiting for input)
+  if echo "$output" | grep -qiE "(waiting for input|press any key|continue\?|\[Y/n\]|\\(yes/no\\)|enter to continue|interactive prompt)"; then
+    echo "[Ralph] WARNING: Agent may be waiting for interactive input!" >&2
+    echo "[Ralph] This can cause the build to hang. Consider using non-interactive flags." >&2
+  fi
+
   printf '%s\n' "$output"
   return "$exit_code"
 }
@@ -397,6 +412,42 @@ if ! grep -q "PRD Complete Before Story Done" "$GUARDRAILS_PATH" 2>/dev/null; th
     echo "- **Why**: The PRD is the source of truth. Without this update, the story will be re-picked in future iterations."
     echo "- **Action**: Before completing, verify the story's status in the PRD shows \"done\", not \"in_progress\" or \"open\""
     echo "- **Added after**: Stories being marked complete in code but PRD staying stale, causing redundant work"
+    echo ""
+  } >> "$GUARDRAILS_PATH"
+fi
+
+# Add the completion signal format guardrail if not already present
+if ! grep -q "Completion Signal Must Be Standalone" "$GUARDRAILS_PATH" 2>/dev/null; then
+  {
+    echo "### Sign: Completion Signal Must Be Standalone"
+    echo "- **Trigger**: When outputting the completion signal"
+    echo "- **Instruction**: The completion signal MUST be on its own line with exact formatting"
+    echo "- **Format**: \`<promise>COMPLETE</promise>\` (case-sensitive, no extra spaces in tags)"
+    echo "- **Why**: The build loop uses grep to detect completion. Merged or malformed signals won't be detected."
+    echo "- **Examples**:"
+    echo "  - ✅ CORRECT: The final line of output is just \`<promise>COMPLETE</promise>\`"
+    echo "  - ❌ WRONG: \"Done! <promise>COMPLETE</promise>\" (merged with text)"
+    echo "  - ❌ WRONG: \"<promise>complete</promise>\" (wrong case)"
+    echo "- **Added after**: Agents outputting completion signals that weren't detected, causing stories to be reset to open"
+    echo ""
+  } >> "$GUARDRAILS_PATH"
+fi
+
+# Add the avoid interactive prompts guardrail if not already present
+if ! grep -q "Avoid Interactive Prompts" "$GUARDRAILS_PATH" 2>/dev/null; then
+  {
+    echo "### Sign: Avoid Interactive Prompts"
+    echo "- **Trigger**: Before running any command that might prompt for input"
+    echo "- **Instruction**: Never run commands that require interactive input. Always use non-interactive flags."
+    echo "- **Why**: Interactive prompts cause the build to hang indefinitely, waiting for user input."
+    echo "- **Examples**:"
+    echo "  - ❌ WRONG: \`npm install\` (may prompt for permissions)"
+    echo "  - ✅ CORRECT: \`npm install --yes --silent\`"
+    echo "  - ❌ WRONG: \`pip install package\` (may prompt for confirmation)"
+    echo "  - ✅ CORRECT: \`pip install package --quiet --no-input\`"
+    echo "  - ❌ WRONG: \`apt-get install package\` (prompts for confirmation)"
+    echo "  - ✅ CORRECT: \`apt-get install -y package\`"
+    echo "- **Added after**: Build hangs caused by commands waiting for interactive input"
     echo ""
   } >> "$GUARDRAILS_PATH"
 fi
@@ -1023,12 +1074,29 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
       log_error "ITERATION $i exited non-zero; review $LOG_FILE"
       update_story_status "$STORY_ID" "open"
       echo "Iteration failed; story reset to open."
-    elif grep -q "<promise>COMPLETE</promise>" "$LOG_FILE"; then
-      update_story_status "$STORY_ID" "done"
-      echo "Completion signal received; story marked done."
     else
-      update_story_status "$STORY_ID" "open"
-      echo "No completion signal; story reset to open."
+      # Check for completion signal with robust pattern matching
+      # Signal must be on its own line, but we allow for:
+      # - Leading/trailing whitespace
+      # - Case variations (COMPLETE, complete, Complete)
+      # - Minor formatting differences (spaces within tags)
+      COMPLETE_SIGNAL=""
+      COMPLETE_SIGNAL=$(grep -iE '^\s*<promise>\s*COMPLETE\s*</promise>\s*$' "$LOG_FILE" || true)
+
+      if [ -n "$COMPLETE_SIGNAL" ]; then
+        update_story_status "$STORY_ID" "done"
+        echo "Completion signal received; story marked done."
+        echo "  Signal found: $COMPLETE_SIGNAL"
+      else
+        # Try additional pattern checks for debugging
+        if grep -qi "promise.*complete" "$LOG_FILE"; then
+          echo "Warning: Completion signal found but not in expected format."
+          echo "  Signal must be on its own line as: <promise>COMPLETE</promise>"
+          log_error "ITERATION $i: Malformed completion signal in $LOG_FILE"
+        fi
+        update_story_status "$STORY_ID" "open"
+        echo "No valid completion signal; story reset to open."
+      fi
     fi
     REMAINING="$(remaining_from_prd)"
     echo "Iteration $i complete. Remaining stories: $REMAINING"

@@ -370,14 +370,14 @@ async function main() {
       claude: "claude -p --dangerously-skip-permissions \"$(cat {prompt})\"",
       droid: "droid exec --skip-permissions-unsafe -f {prompt}",
       opencode: "opencode run \"$(cat {prompt})\"",
-      glm: "claude -p --dangerously-skip-permissions --settings ~/.claude/zai-settings.json \"$(cat {prompt})\"",
+      glm: "claude -p --fork-session --dangerously-skip-permissions --settings ~/.claude/zai-settings.json \"$(cat {prompt})\"",
     };
     const interactiveDefaults = {
       codex: "codex --yolo {prompt}",
       claude: "claude --dangerously-skip-permissions {prompt}",
       droid: "droid --skip-permissions-unsafe {prompt}",
       opencode: "opencode --prompt {prompt}",
-      glm: "claude --dangerously-skip-permissions --settings ~/.claude/zai-settings.json {prompt}",
+      glm: "claude --fork-session --dangerously-skip-permissions --settings ~/.claude/zai-settings.json {prompt}",
     };
     const agentsPath = path.join(templateDir, "agents.sh");
     if (!exists(agentsPath)) {
