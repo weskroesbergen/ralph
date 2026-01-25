@@ -996,13 +996,17 @@ elif [[ "$AGENT_CMD" == *"--settings"* ]]; then
 fi
 echo "Agent: $AGENT_DISPLAY"
 HAS_ERROR="false"
+MAX_RETRIES=3  # Max retries for "No messages returned" errors
+RETRY_COUNT=0  # Initialize retry counter outside the loop
 
-for i in $(seq 1 "$MAX_ITERATIONS"); do
+i=1
+while [ $i -le $MAX_ITERATIONS ]; do
   echo ""
   echo "═══════════════════════════════════════════════════════"
   echo "  Ralph Iteration $i of $MAX_ITERATIONS"
   echo "═══════════════════════════════════════════════════════"
 
+  HAS_CRITICAL_ERROR=false
   STORY_META=""
   STORY_BLOCK=""
   ITER_START=$(date +%s)
@@ -1127,6 +1131,35 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   else
     echo "Iteration $i complete."
   fi
+
+  # Check for "No messages returned" error and retry
+  if [ "$MODE" = "build" ] && [ "$HAS_CRITICAL_ERROR" = "true" ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+    if grep -qiE "No messages returned" "$LOG_FILE"; then
+      RETRY_COUNT=$((RETRY_COUNT + 1))
+      echo "[Ralph] 'No messages returned' detected. Retrying iteration $i (attempt $RETRY_COUNT/$MAX_RETRIES)..."
+      log_error "ITERATION $i: 'No messages returned' - retrying (attempt $RETRY_COUNT/$MAX_RETRIES)"
+
+      # Clear Claude conversation state to force fresh start
+      local claude_dir="$HOME/.claude"
+      local conversations_dir="$claude_dir/conversations"
+      if [ -d "$conversations_dir" ]; then
+        local latest_conv
+        latest_conv="$(find "$conversations_dir" -type f -name "*.json" -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1)"
+        if [ -n "$latest_conv" ]; then
+          echo "[Ralph] Removing latest conversation: $latest_conv"
+          rm -f "$latest_conv"
+        fi
+      fi
+
+      # Retry the same iteration (don't increment i)
+      sleep 2
+      continue
+    fi
+  fi
+
+  # Move to next iteration
+  RETRY_COUNT=0  # Reset retry counter for next iteration
+  i=$((i + 1))
   sleep 2
 
 done
