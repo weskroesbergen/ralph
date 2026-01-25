@@ -14,12 +14,48 @@ Ralph treats **files and git** as memory, not the model context:
 
 ![Ralph architecture](diagram.svg)
 
-## Global CLI (recommended)
+## Local development setup
+
+If you've cloned this repository:
+
+```bash
+# Install dependencies and link the CLI locally
+npm install
+npm link
+
+# Install Ralph templates into your current project
+ralph install
+
+# Install required skills (commit, dev-browser, prd)
+ralph install --skills
+```
+
+The `ralph install` command will **overwrite** existing templates and skills in your project, ensuring you're using the latest version.
+
+## Install
 
 Install and run Ralph from anywhere:
 
 ```bash
-npm i -g @iannuttall/ralph
+# Uninstall any previous version first
+npm uninstall -g @iannuttall/ralph
+
+# From npm (when published)
+npm i -g @weskroesbergen/ralph
+
+# Or install directly from GitHub
+npm i -g github:weskroesbergen/ralph
+
+# Or clone and link from a local repo
+git clone https://github.com/weskroesbergen/ralph.git
+cd ralph
+npm install
+npm link
+```
+
+Then run:
+
+```bash
 ralph prd # launches an interactive prompt
 ralph build 1 # one Ralph run
 ```

@@ -13,7 +13,6 @@ const localDir = path.join(cwd, ".agents", "ralph");
 const skillsRoot = path.join(repoRoot, "skills");
 let agentOverride = null;
 let installSkills = false;
-let installForce = false;
 let prdPath = null;
 let progressPath = null;
 let prdOutPath = null;
@@ -72,7 +71,7 @@ function usage() {
   console.log(`ralph <command>
 
 Commands:
-  install [--skills] [--force]        Copy .agents/ralph into the current repo
+  install [--skills]                  Copy .agents/ralph into the current repo
   prd ["<request>"] [--out path]      Generate a PRD (JSON) via agent
   ping                                Minimal agent health check
   log "<message>"                     Append to .ralph/activity.log
@@ -149,10 +148,6 @@ for (let i = 0; i < rawArgs.length; i += 1) {
   }
   if (arg === "--skills") {
     installSkills = true;
-    continue;
-  }
-  if (arg === "--force") {
-    installForce = true;
     continue;
   }
   if (arg.startsWith("--prd=")) {
@@ -267,10 +262,6 @@ async function runInstallSkills() {
       skipped.push(`${skill} (missing in repo)`);
       continue;
     }
-    if (exists(target) && !installForce) {
-      skipped.push(`${skill} (already exists)`);
-      continue;
-    }
     fs.cpSync(source, target, { recursive: true, force: true });
     installed.push(skill);
   }
@@ -307,17 +298,13 @@ async function main() {
   }
 
   if (cmd === "install") {
-    if (exists(localDir) && !installForce) {
-      console.log(`.agents/ralph already exists at ${localDir}. Skipping templates.`);
-    } else {
-      if (!exists(globalDir)) {
-        console.error(`Bundled templates not found at ${globalDir}.`);
-        process.exit(1);
-      }
-      fs.mkdirSync(path.dirname(localDir), { recursive: true });
-      fs.cpSync(globalDir, localDir, { recursive: true, force: true });
-      console.log(`Installed .agents/ralph to ${localDir}`);
+    if (!exists(globalDir)) {
+      console.error(`Bundled templates not found at ${globalDir}.`);
+      process.exit(1);
     }
+    fs.mkdirSync(path.dirname(localDir), { recursive: true });
+    fs.cpSync(globalDir, localDir, { recursive: true, force: true });
+    console.log(`Installed .agents/ralph to ${localDir}`);
     const readmeSrc = path.join(repoRoot, "README.md");
     const diagramSrc = path.join(repoRoot, "diagram.svg");
     const imageSrc = path.join(repoRoot, "ralph.webp");
