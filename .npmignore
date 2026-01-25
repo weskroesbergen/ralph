@@ -1,0 +1,46 @@
+# Tests
+tests/
+*.test.mjs
+*.test.js
+
+# Examples
+examples/
+
+# Development
+.git/
+.gitignore
+.github/
+.npmrc/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+mcp-server.log
+
+# Local state and temp
+.ralph/
+.tmp/
+.env
+.env.*
+
+# Build artifacts
+coverage/
+dist/
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# CI/CD
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Misc
+.agent-permissions-history

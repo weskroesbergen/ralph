@@ -1,10 +1,19 @@
 {
-  "name": "@iannuttall/ralph",
-  "version": "0.1.3",
+  "name": "@weskroesbergen/ralph",
+  "version": "0.1.4",
   "description": "Minimal, file-based agent loop for autonomous coding.",
   "bin": {
     "ralph": "bin/ralph"
   },
+  "files": [
+    "bin/",
+    ".agents/ralph/",
+    "skills/",
+    "README.md",
+    "diagram.svg",
+    "ralph.webp",
+    "AGENTS.md"
+  ],
   "scripts": {
     "test": "node tests/cli-smoke.mjs && node tests/agent-loops.mjs",
     "test:real": "node tests/real-agents.mjs",
