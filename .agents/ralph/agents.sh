@@ -11,6 +11,8 @@ AGENT_OPENCODE_CMD="opencode run \"\$(cat {prompt})\""
 AGENT_OPENCODE_INTERACTIVE_CMD="opencode --prompt {prompt}"
 AGENT_GLM_CMD="claude -p --fork-session --dangerously-skip-permissions --settings ~/.claude/zai-settings.json \"\$(cat {prompt})\""
 AGENT_GLM_INTERACTIVE_CMD="claude --fork-session --dangerously-skip-permissions --settings ~/.claude/zai-settings.json {prompt}"
+AGENT_KIMI_CMD="claude -p --fork-session --dangerously-skip-permissions --settings ~/.claude/kimi-settings.json \"\$(cat {prompt})\""
+AGENT_KIMI_INTERACTIVE_CMD="claude --fork-session --dangerously-skip-permissions --settings ~/.claude/kimi-settings.json {prompt}"
 # Uncomment to use server mode (faster, avoids cold boot):
 # AGENT_OPENCODE_CMD="opencode run --attach http://localhost:4096 \"\$(cat {prompt})\""
 # AGENT_OPENCODE_INTERACTIVE_CMD="opencode --prompt {prompt} --attach http://localhost:4096"

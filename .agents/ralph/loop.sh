@@ -60,6 +60,12 @@ resolve_agent_cmd() {
     codex|"")
       echo "${AGENT_CODEX_CMD:-codex exec --yolo --skip-git-repo-check -}"
       ;;
+    glm)
+      echo "${AGENT_GLM_CMD:-claude -p --fork-session --dangerously-skip-permissions --settings ~/.claude/zai-settings.json \"\$(cat {prompt})\"}"
+      ;;
+    kimi)
+      echo "${AGENT_KIMI_CMD:-claude -p --fork-session --dangerously-skip-permissions --settings ~/.claude/kimi-settings.json \"\$(cat {prompt})\"}"
+      ;;
     *)
       echo "${AGENT_CODEX_CMD:-codex exec --yolo --skip-git-repo-check -}"
       ;;

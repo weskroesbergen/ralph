@@ -18,6 +18,8 @@
 # PRD_AGENT_CMD="codex --yolo --skip-git-repo-check {prompt}"
 # AGENT_CMD="claude -p --dangerously-skip-permissions \"\$(cat {prompt})\""
 # AGENT_CMD="droid exec --skip-permissions-unsafe -f {prompt}"
+# AGENT_CMD="claude -p --fork-session --dangerously-skip-permissions --settings ~/.claude/zai-settings.json \"\$(cat {prompt})\""
+# AGENT_CMD="claude -p --fork-session --dangerously-skip-permissions --settings ~/.claude/kimi-settings.json \"\$(cat {prompt})\""
 # AGENTS_PATH="AGENTS.md"
 # PROMPT_BUILD=".agents/ralph/PROMPT_build.md"
 # NO_COMMIT=false

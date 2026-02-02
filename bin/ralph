@@ -83,7 +83,7 @@ Options:
   --prd <path>                        Override PRD path
   --out <path>                        Override PRD output path (prd command)
   --progress <path>                   Override progress log path
-  --agent <codex|claude|droid|opencode|glm>  Override agent runner
+  --agent <codex|claude|droid|opencode|glm|kimi>  Override agent runner
   --settings <path>                   Claude settings file for agent
 
 Notes:
@@ -207,6 +207,7 @@ async function runInstallSkills() {
       { value: "droid", label: "droid" },
       { value: "opencode", label: "opencode" },
       { value: "glm", label: "glm" },
+      { value: "kimi", label: "kimi" },
     ],
     initialValue: agentOverride || "codex",
   });
@@ -358,6 +359,7 @@ async function main() {
       droid: "droid exec --skip-permissions-unsafe -f {prompt}",
       opencode: "opencode run \"$(cat {prompt})\"",
       glm: "claude -p --fork-session --dangerously-skip-permissions --settings ~/.claude/zai-settings.json \"$(cat {prompt})\"",
+      kimi: "claude -p --fork-session --dangerously-skip-permissions --settings ~/.claude/kimi-settings.json \"$(cat {prompt})\"",
     };
     const interactiveDefaults = {
       codex: "codex --yolo {prompt}",
@@ -365,6 +367,7 @@ async function main() {
       droid: "droid --skip-permissions-unsafe {prompt}",
       opencode: "opencode --prompt {prompt}",
       glm: "claude --fork-session --dangerously-skip-permissions --settings ~/.claude/zai-settings.json {prompt}",
+      kimi: "claude --fork-session --dangerously-skip-permissions --settings ~/.claude/kimi-settings.json {prompt}",
     };
     const agentsPath = path.join(templateDir, "agents.sh");
     if (!exists(agentsPath)) {
@@ -383,11 +386,13 @@ async function main() {
       'printf "AGENT_DROID_CMD=%s\\n" "${AGENT_DROID_CMD:-}"',
       'printf "AGENT_OPENCODE_CMD=%s\\n" "${AGENT_OPENCODE_CMD:-}"',
       'printf "AGENT_GLM_CMD=%s\\n" "${AGENT_GLM_CMD:-}"',
+      'printf "AGENT_KIMI_CMD=%s\\n" "${AGENT_KIMI_CMD:-}"',
       'printf "AGENT_CODEX_INTERACTIVE_CMD=%s\\n" "${AGENT_CODEX_INTERACTIVE_CMD:-}"',
       'printf "AGENT_CLAUDE_INTERACTIVE_CMD=%s\\n" "${AGENT_CLAUDE_INTERACTIVE_CMD:-}"',
       'printf "AGENT_DROID_INTERACTIVE_CMD=%s\\n" "${AGENT_DROID_INTERACTIVE_CMD:-}"',
       'printf "AGENT_OPENCODE_INTERACTIVE_CMD=%s\\n" "${AGENT_OPENCODE_INTERACTIVE_CMD:-}"',
       'printf "AGENT_GLM_INTERACTIVE_CMD=%s\\n" "${AGENT_GLM_INTERACTIVE_CMD:-}"',
+      'printf "AGENT_KIMI_INTERACTIVE_CMD=%s\\n" "${AGENT_KIMI_INTERACTIVE_CMD:-}"',
     ].join("; ");
     const result = spawnSync("bash", ["-lc", bashCmd], { encoding: "utf-8" });
     if (result.status !== 0) {
@@ -412,6 +417,7 @@ async function main() {
         droid: readVar("AGENT_DROID_CMD") || defaults.droid,
         opencode: readVar("AGENT_OPENCODE_CMD") || defaults.opencode,
         glm: readVar("AGENT_GLM_CMD") || defaults.glm,
+        kimi: readVar("AGENT_KIMI_CMD") || defaults.kimi,
       },
       interactive: {
         codex: readVar("AGENT_CODEX_INTERACTIVE_CMD") || interactiveDefaults.codex,
@@ -419,6 +425,7 @@ async function main() {
         droid: readVar("AGENT_DROID_INTERACTIVE_CMD") || interactiveDefaults.droid,
         opencode: readVar("AGENT_OPENCODE_INTERACTIVE_CMD") || interactiveDefaults.opencode,
         glm: readVar("AGENT_GLM_INTERACTIVE_CMD") || interactiveDefaults.glm,
+        kimi: readVar("AGENT_KIMI_INTERACTIVE_CMD") || interactiveDefaults.kimi,
       },
       defaultAgent: readVar("DEFAULT_AGENT") || "codex",
     };
@@ -431,7 +438,7 @@ async function main() {
     const mapped = agentMap[agentOverride];
     if (!mapped) {
       console.error(`Unknown agent: ${agentOverride}`);
-      console.error("Valid values: codex, claude, droid, opencode, glm");
+      console.error("Valid values: codex, claude, droid, opencode, glm, kimi");
       process.exit(1);
     }
     process.env.AGENT_CMD = mapped;
