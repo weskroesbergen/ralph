@@ -997,7 +997,7 @@ AGENT_DISPLAY="$AGENT_BIN"
 if [[ "$AGENT_CMD" == *"zai-settings.json"* ]]; then
   AGENT_DISPLAY="$AGENT_BIN (glm via z.ai settings)"
 elif [[ "$AGENT_CMD" == *"--settings"* ]]; then
-  SETTINGS_FILE=$(echo "$AGENT_CMD" | grep -o '--settings [^ ]*' | cut -d' ' -f2)
+  SETTINGS_FILE=$(echo "$AGENT_CMD" | sed -n 's/.*--settings \([^ ]*\).*/\1/p')
   AGENT_DISPLAY="$AGENT_BIN (custom: $SETTINGS_FILE)"
 fi
 echo "Agent: $AGENT_DISPLAY"
