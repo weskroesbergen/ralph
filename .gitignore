@@ -22,3 +22,5 @@ pnpm-debug.log*
 # Coverage / build
 coverage/
 dist/
+
+**/tsc-cache/
