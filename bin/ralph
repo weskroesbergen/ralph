@@ -189,6 +189,12 @@ for (let i = 0; i < rawArgs.length; i += 1) {
   args.push(arg);
 }
 
+// Validate settings file exists if provided
+if (settingsPath && !exists(settingsPath)) {
+  console.error(`Settings file not found: ${settingsPath}`);
+  process.exit(1);
+}
+
 const cmd = args[0];
 if (cmd === "help" || cmd === "-h" || cmd === "--help") {
   usage();

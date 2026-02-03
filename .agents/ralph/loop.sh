@@ -9,6 +9,21 @@
 
 set -euo pipefail
 
+# Check for required dependencies early
+check_deps() {
+  local missing=()
+  for cmd in python3 git date sed stat mkdir dirname basename; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      missing+=("$cmd")
+    fi
+  done
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo "ERROR: Missing required dependencies: ${missing[*]}" >&2
+    exit 1
+  fi
+}
+check_deps
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${RALPH_ROOT:-${SCRIPT_DIR}/../..}" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/config.sh"
@@ -108,10 +123,37 @@ ERRORS_LOG_PATH="$(abs_path "$ERRORS_LOG_PATH")"
 ACTIVITY_LOG_PATH="$(abs_path "$ACTIVITY_LOG_PATH")"
 TMP_DIR="$(abs_path "$TMP_DIR")"
 RUNS_DIR="$(abs_path "$RUNS_DIR")"
+
+# Cleanup function for signal handling
+cleanup() {
+  local exit_code=$?
+  # Clean up temp files if TMP_DIR is set and exists
+  if [ -n "${TMP_DIR:-}" ] && [ -d "$TMP_DIR" ]; then
+    # Only remove files created by this process, not the entire directory
+    # as other concurrent runs might be using it
+    rm -f "$TMP_DIR"/*.tmp.$$ 2>/dev/null || true
+  fi
+  exit $exit_code
+}
+trap cleanup EXIT INT TERM
 GUARDRAILS_REF="$(abs_path "$GUARDRAILS_REF")"
 CONTEXT_REF="$(abs_path "$CONTEXT_REF")"
 # ACTIVITY_CMD is a shell command, not a file path - don't abs_path it
 # ACTIVITY_CMD="$(abs_path "$ACTIVITY_CMD")"
+
+# Helper for atomic file append
+atomic_append() {
+  local content="$1"
+  local target="$2"
+  local tmp_file
+  tmp_file="$target.tmp.$$"
+  # Copy existing content if file exists
+  if [ -f "$target" ]; then
+    cat "$target" > "$tmp_file"
+  fi
+  printf '%s' "$content" >> "$tmp_file"
+  mv "$tmp_file" "$target"
+}
 
 require_agent() {
   local agent_cmd="${1:-$AGENT_CMD}"
@@ -165,7 +207,7 @@ run_agent() {
     output=$(eval "$cmd" 2>&1)
     exit_code=$?
   else
-    output=$(cat "$prompt_file" | eval "$cmd" 2>&1)
+    output=$(eval "$cmd" < "$prompt_file" 2>&1)
     exit_code=$?
   fi
 
@@ -178,11 +220,12 @@ run_agent() {
     local conversations_dir="$claude_dir/conversations"
     if [ -d "$conversations_dir" ]; then
       # Find and remove the most recent conversation (likely the problematic one)
+      # Using stat instead of GNU find -printf for BSD/macOS compatibility
       local latest_conv
-      latest_conf="$(find "$conversations_dir" -type f -name "*.json" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)"
-      if [ -n "$latest_conf" ]; then
-        echo "[Ralph] Clearing conversation state: $latest_conf" >&2
-        rm -f "$latest_conf"
+      latest_conv="$(find "$conversations_dir" -type f -name "*.json" -exec stat -f '%m %N' {} + 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)"
+      if [ -n "$latest_conv" ]; then
+        echo "[Ralph] Clearing conversation state: $latest_conv" >&2
+        rm -f "$latest_conv"
       fi
     fi
 
@@ -210,7 +253,7 @@ run_agent() {
       # For piped commands, add --fresh flag
       local fresh_cmd="${retry_cmd/claude /claude --fresh }"
       echo "[Ralph] Retrying with --fresh flag..." >&2
-      output=$(cat "$prompt_file" | eval "$fresh_cmd" 2>&1)
+      output=$(eval "$fresh_cmd" < "$prompt_file" 2>&1)
       exit_code=$?
     fi
 
@@ -221,17 +264,20 @@ run_agent() {
     fi
   fi
 
+  # Single-pass output analysis for errors and warnings
+  local output_analysis
+  output_analysis=$(echo "$output" | grep -iE "(No messages returned|SyntaxError|Traceback|TypeError|ReferenceError|undefined is not a function|Cannot read|script error|permission denied|command not found|waiting for input|press any key|continue\?|\[Y/n\]|\\(yes/no\\)|enter to continue|interactive prompt)" || true)
+
   # Detect and report common script errors that might cause hangs or failed completion
   if [ "$exit_code" -ne 0 ]; then
-    # Check for specific error patterns
-    if echo "$output" | grep -qiE "(SyntaxError|Traceback|TypeError|ReferenceError|undefined is not a function|Cannot read|script error|permission denied|command not found|No messages returned)"; then
+    if echo "$output_analysis" | grep -qiE "(SyntaxError|Traceback|TypeError|ReferenceError|undefined is not a function|Cannot read|script error|permission denied|command not found|No messages returned)"; then
       echo "[Ralph] WARNING: Script error detected in agent output!" >&2
       echo "[Ralph] The agent may have encountered a runtime error that prevented completion." >&2
     fi
   fi
 
   # Detect potential hangs (interactive prompts, waiting for input)
-  if echo "$output" | grep -qiE "(waiting for input|press any key|continue\?|\[Y/n\]|\\(yes/no\\)|enter to continue|interactive prompt)"; then
+  if echo "$output_analysis" | grep -qiE "(waiting for input|press any key|continue\?|\[Y/n\]|\\(yes/no\\)|enter to continue|interactive prompt)"; then
     echo "[Ralph] WARNING: Agent may be waiting for interactive input!" >&2
     echo "[Ralph] This can cause the build to hang. Consider using non-interactive flags." >&2
   fi
@@ -420,51 +466,17 @@ fi
 
 # Add the PRD completion guardrail if not already present
 if ! grep -q "PRD Complete Before Story Done" "$GUARDRAILS_PATH" 2>/dev/null; then
-  {
-    echo "### Sign: PRD Complete Before Story Done"
-    echo "- **Trigger**: Before outputting \`<promise>COMPLETE</promise>\`"
-    echo "- **Instruction**: Story is NOT complete until the PRD JSON status is updated to \"done\""
-    echo "- **Why**: The PRD is the source of truth. Without this update, the story will be re-picked in future iterations."
-    echo "- **Action**: Before completing, verify the story's status in the PRD shows \"done\", not \"in_progress\" or \"open\""
-    echo "- **Added after**: Stories being marked complete in code but PRD staying stale, causing redundant work"
-    echo ""
-  } >> "$GUARDRAILS_PATH"
+  atomic_append "### Sign: PRD Complete Before Story Done\n- **Trigger**: Before outputting \`<promise>COMPLETE</promise>\`\n- **Instruction**: Story is NOT complete until the PRD JSON status is updated to \"done\"\n- **Why**: The PRD is the source of truth. Without this update, the story will be re-picked in future iterations.\n- **Action**: Before completing, verify the story's status in the PRD shows \"done\", not \"in_progress\" or \"open\"\n- **Added after**: Stories being marked complete in code but PRD staying stale, causing redundant work\n\n" "$GUARDRAILS_PATH"
 fi
 
 # Add the completion signal format guardrail if not already present
 if ! grep -q "Completion Signal Must Be Standalone" "$GUARDRAILS_PATH" 2>/dev/null; then
-  {
-    echo "### Sign: Completion Signal Must Be Standalone"
-    echo "- **Trigger**: When outputting the completion signal"
-    echo "- **Instruction**: The completion signal MUST be on its own line with exact formatting"
-    echo "- **Format**: \`<promise>COMPLETE</promise>\` (case-sensitive, no extra spaces in tags)"
-    echo "- **Why**: The build loop uses grep to detect completion. Merged or malformed signals won't be detected."
-    echo "- **Examples**:"
-    echo "  - ✅ CORRECT: The final line of output is just \`<promise>COMPLETE</promise>\`"
-    echo "  - ❌ WRONG: \"Done! <promise>COMPLETE</promise>\" (merged with text)"
-    echo "  - ❌ WRONG: \"<promise>complete</promise>\" (wrong case)"
-    echo "- **Added after**: Agents outputting completion signals that weren't detected, causing stories to be reset to open"
-    echo ""
-  } >> "$GUARDRAILS_PATH"
+  atomic_append "### Sign: Completion Signal Must Be Standalone\n- **Trigger**: When outputting the completion signal\n- **Instruction**: The completion signal MUST be on its own line with exact formatting\n- **Format**: \`<promise>COMPLETE</promise>\` (case-sensitive, no extra spaces in tags)\n- **Why**: The build loop uses grep to detect completion. Merged or malformed signals won't be detected.\n- **Examples**:\n  - ✅ CORRECT: The final line of output is just \`<promise>COMPLETE</promise>\`\n  - ❌ WRONG: \"Done! <promise>COMPLETE</promise>\" (merged with text)\n  - ❌ WRONG: \"<promise>complete</promise>\" (wrong case)\n- **Added after**: Agents outputting completion signals that weren't detected, causing stories to be reset to open\n\n" "$GUARDRAILS_PATH"
 fi
 
 # Add the avoid interactive prompts guardrail if not already present
 if ! grep -q "Avoid Interactive Prompts" "$GUARDRAILS_PATH" 2>/dev/null; then
-  {
-    echo "### Sign: Avoid Interactive Prompts"
-    echo "- **Trigger**: Before running any command that might prompt for input"
-    echo "- **Instruction**: Never run commands that require interactive input. Always use non-interactive flags."
-    echo "- **Why**: Interactive prompts cause the build to hang indefinitely, waiting for user input."
-    echo "- **Examples**:"
-    echo "  - ❌ WRONG: \`npm install\` (may prompt for permissions)"
-    echo "  - ✅ CORRECT: \`npm install --yes --silent\`"
-    echo "  - ❌ WRONG: \`pip install package\` (may prompt for confirmation)"
-    echo "  - ✅ CORRECT: \`pip install package --quiet --no-input\`"
-    echo "  - ❌ WRONG: \`apt-get install package\` (prompts for confirmation)"
-    echo "  - ✅ CORRECT: \`apt-get install -y package\`"
-    echo "- **Added after**: Build hangs caused by commands waiting for interactive input"
-    echo ""
-  } >> "$GUARDRAILS_PATH"
+  atomic_append "### Sign: Avoid Interactive Prompts\n- **Trigger**: Before running any command that might prompt for input\n- **Instruction**: Never run commands that require interactive input. Always use non-interactive flags.\n- **Why**: Interactive prompts cause the build to hang indefinitely, waiting for user input.\n- **Examples**:\n  - ❌ WRONG: \`npm install\` (may prompt for permissions)\n  - ✅ CORRECT: \`npm install --yes --silent\`\n  - ❌ WRONG: \`pip install package\` (may prompt for confirmation)\n  - ✅ CORRECT: \`pip install package --quiet --no-input\`\n  - ❌ WRONG: \`apt-get install package\` (prompts for confirmation)\n  - ✅ CORRECT: \`apt-get install -y package\`\n- **Added after**: Build hangs caused by commands waiting for interactive input\n\n" "$GUARDRAILS_PATH"
 fi
 
 if [ ! -f "$ERRORS_LOG_PATH" ]; then
@@ -852,14 +864,16 @@ log_activity() {
   local message="$1"
   local timestamp
   timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-  echo "[$timestamp] $message" >> "$ACTIVITY_LOG_PATH"
+  # Atomic write using helper
+  atomic_append "[$timestamp] $message\n" "$ACTIVITY_LOG_PATH"
 }
 
 log_error() {
   local message="$1"
   local timestamp
   timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-  echo "[$timestamp] $message" >> "$ERRORS_LOG_PATH"
+  # Atomic write using helper
+  atomic_append "[$timestamp] $message\n" "$ERRORS_LOG_PATH"
 }
 
 append_run_summary() {
@@ -1149,8 +1163,9 @@ while [ $i -le $MAX_ITERATIONS ]; do
       local claude_dir="$HOME/.claude"
       local conversations_dir="$claude_dir/conversations"
       if [ -d "$conversations_dir" ]; then
+        # Portable: use stat instead of GNU find -print0 | xargs -0
         local latest_conv
-        latest_conv="$(find "$conversations_dir" -type f -name "*.json" -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1)"
+        latest_conv="$(find "$conversations_dir" -type f -name "*.json" -exec stat -f '%m %N' {} + 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)"
         if [ -n "$latest_conv" ]; then
           echo "[Ralph] Removing latest conversation: $latest_conv"
           rm -f "$latest_conv"
