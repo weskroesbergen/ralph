@@ -1,6 +1,6 @@
 {
   "name": "@weskroesbergen/ralph",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Minimal, file-based agent loop for autonomous coding.",
   "bin": {
     "ralph": "bin/ralph"
